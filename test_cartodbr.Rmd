@@ -1,0 +1,114 @@
+---
+title: "Test cartodbr package for working with named and anonymous maps"
+---
+
+Run setup code
+```{r, fig.align='center'}
+library(leaflet)
+library(cartodbr)
+
+# Use Resilience Atlas CartoDB server
+cdb_user <- 'grp'
+cdb_domain <- 'grp.global.ssl.fastly.net'
+cdb_token <- scan('grp_cdb_api_key.txt', 'character')
+mapbox_token <- scan('grp_mapbox_api_key.txt', 'character')
+
+```
+
+# Test anonymous maps
+
+Note that anonymous maps expire - so if the below map doesn't work it is because the code 
+wasn't run recently enough. For web pages "named maps" (next section) should be 
+used.
+
+```{r, fig.align='center'}
+# Setup sensitivity map as in the publication
+sensitivity_ramp <- colorRampPalette(colors=c("#006636", "#F4E337", "#FF3234"))
+sensitivity_css <- '#vegetation_sensitivity_clean_stretched {raster-opacity:1; raster-scaling:near; raster-colorizer-default-mode:linear; raster-colorizer-default-color: transparent; raster-colorizer-epsilon:0.41; raster-colorizer-stops: stop(-1, transparent) stop(0, #006636) stop(50, #F4E337) stop(100, #FF3234)}'
+sensitivity_sql <- 'select * from vegetation_sensitivity_clean_stretched'
+sensitivity_layer <- mapconfig_raster(sensitivity_sql, sensitivity_css)
+
+# Make anonymous map on CartoDB server
+id <- create_anon_map(sensitivity_layer, user=cdb_user, domain=cdb_domain, 
+                      subdomain=FALSE)
+
+# Draw the map on screen
+anon_map <- leaflet() %>%
+  addTiles(urlTemplate=paste0('https://api.tiles.mapbox.com/v4/cigrp.2ad62493/{z}/{x}/{y}.png?access_token=', 
+                              mapbox_token),
+           attribution="<a href='http://www.resilienceatlas.org'>Resilience Atlas</a>") %>%
+  addTiles(urlTemplate=paste0('https://grp.global.ssl.fastly.net/user/grp/api/v1/map/', id, '/0/{z}/{x}/{y}.png'),
+           attribution="<a href='http://go.nature.com/O2vNtU'>Seddon et al. 2016</a>") %>%
+  addTiles(paste0(urlTemplate='https://api.tiles.mapbox.com/v4/cigrp.829fd2d8/{z}/{x}/{y}.png?access_token=', 
+                  mapbox_token)) %>%
+  setView(-55, -5, zoom=4) %>%
+  addLegend("bottomright", pal=colorNumeric(sensitivity_ramp(10), seq(0, 100)), 
+            values=seq(0, 100), title="Sensitivity", opacity=1)
+anon_map
+
+
+```
+
+# Test named maps
+
+```{r, fig.align='center'}
+# Create named map on server
+resp <- create_named_map(name='sensitivity_test', layers=sensitivity_layer, 
+                         user=cdb_user, domain=cdb_domain, api_key=cdb_token, 
+                         subdomain=FALSE, overwrite=TRUE)
+
+# Instantiate named map so tiles can be drawn from the server
+id <- inst_named_map(name='sensitivity_test', user=cdb_user, 
+                     domain=cdb_domain, api_key=cdb_token,  subdomain=FALSE, 
+                     overwrite=TRUE)
+
+# Draw the map on screen
+sens_map <- leaflet() %>%
+  addTiles(urlTemplate=paste0('https://api.tiles.mapbox.com/v4/cigrp.2ad62493/{z}/{x}/{y}.png?access_token=', 
+                              mapbox_token),
+           attribution="<a href='http://www.resilienceatlas.org'>Resilience Atlas</a>") %>%
+  addTiles(urlTemplate=paste0('https://grp.global.ssl.fastly.net/user/grp/api/v1/map/', id, '/all/{z}/{x}/{y}.png'),
+           attribution="<a href='http://go.nature.com/O2vNtU'>Seddon et al. 2016</a>") %>%
+  setView(-55, -5, zoom=4) %>%
+  addLegend("bottomright", pal=colorNumeric(sensitivity_ramp(10), seq(0,100)), 
+            values=seq(0,100, 10), title="Sensitivity", opacity=1)
+sens_map
+
+```
+
+# Test map overlays
+
+Overlay the green/yellow/red Amazon layer
+
+```{r, fig.align='center'}
+amazon_css <- '#green_yellow_red_amazoniay {
+    raster-opacity:1;
+    raster-scaling:near;
+    raster-colorizer-default-mode:discrete;
+    raster-colorizer-default-color: transparent;
+    raster-colorizer-epsilon:0.41;
+    raster-colorizer-stops: stop(-1, transparent) stop(1, #FF4D4D) stop(2, #FFFFBE) stop(3, #73B273)
+}'
+amazon_sql <- 'select * from green_yellow_red_amazonia'
+amazon_layer <- mapconfig_raster(amazon_sql, amazon_css)
+# Create amazon named map
+amz_id <- create_named_map(name='amazon_green_yellow_red', layers=amazon_layer, 
+                           user=cdb_user, domain=cdb_domain, 
+                           api_key=cdb_token, subdomain=FALSE, overwrite=TRUE)
+
+# Instantiate amazon named map
+id <- inst_named_map(name='amazon_green_yellow_red',  user=cdb_user,  
+                            domain=cdb_domain, api_key=cdb_token, 
+                            subdomain=FALSE)
+overlaid <- addTiles(sens_map, 
+    urlTemplate=paste0('https://grp.global.ssl.fastly.net/user/grp/api/v1/map/', 
+                       id, '/all/{z}/{x}/{y}.png'),
+              attribution="<a href='http://www.conservation.org'>Conservation International</a>") %>%
+    addLegend("topright", title='Green / yellow / red Amazon',
+              opacity=1,
+              colors=c("#FF4D4D", "#FFFFBE", "#73B273"), 
+              labels=c("Agriculture, urban, and deforested areas",
+                       "Intact habitat that is not formally protected",
+                       "Protected areas and indigenous lands"))
+overlaid
+```
